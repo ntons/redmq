@@ -1,0 +1,30 @@
+package redmq
+
+import (
+	"context"
+	"fmt"
+	"testing"
+	"time"
+
+	"github.com/go-redis/redis/v8"
+)
+
+func TestConsumerReceive(t *testing.T) {
+	rdb := redis.NewClient(&redis.Options{Addr: "localhost:6379"})
+
+	client := NewClient(rdb)
+
+	consumer, err := client.Subscribe(ConsumerOptions{
+		Topic:            "my-test-topic",
+		SubscriptionName: "my-test-sub",
+		Name:             "my-test-consumer",
+	})
+	if err != nil {
+		t.Fatalf("Failed to subscribe: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+
+	fmt.Println(consumer.Receive(ctx))
+}

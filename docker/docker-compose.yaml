@@ -1,0 +1,34 @@
+version: "3.9"
+
+services:
+
+  redis0:
+    image: redis:5.0-alpine
+    restart: unless-stopped
+    volumes:
+      - ./etc/redis.conf:/etc/redis.conf
+      - ./var/redmq/redis0/data:/data
+    ports:
+      - "6379:6379"
+    command: ["redis-server", "/etc/redis.conf"]
+
+  redis1:
+    image: redis:5.0-alpine
+    restart: unless-stopped
+    volumes:
+      - ./etc/redis.conf:/etc/redis.conf
+      - ./var/redmq/redis1/data:/data
+    ports:
+      - "6479:6379"
+    command: ["redis-server", "/etc/redis.conf"]
+
+  redis2:
+    image: redis:5.0-alpine
+    restart: unless-stopped
+    volumes:
+      - ./etc/redis.conf:/etc/redis.conf
+      - ./var/redmq/redis2/data:/data
+    ports:
+      - "6579:6379"
+    command: ["redis-server", "/etc/redis.conf"]
+
