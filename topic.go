@@ -10,9 +10,6 @@ import (
 type TopicOptions struct {
 	// Topic specify the topic identifier
 	Topic string `json:"topic,omitempty"`
-
-	// MaxLen specify the max size of topic retentions
-	MaxLen int64 `json:"max_len,omitempty"`
 }
 
 // topicMeta specify the metadata of a topic and be saved along with topic
@@ -31,17 +28,23 @@ func newTopicMeta(topicOptions *TopicOptions) *topicMeta {
 
 // Mapping topic or topicMeta to redis key
 const (
-	topicKeyPrefix    = "topic.{"
+	topicKeyPrefix    = "redmq.topic.{"
 	topicKeyPrefixLen = len(topicKeyPrefix)
 	topicKeySuffix    = "}"
 	topicKeySuffixLen = len(topicKeySuffix)
 	topicKeyPattern   = topicKeyPrefix + "%s" + topicKeySuffix
 
-	topicMetaKeyPrefix    = "topic.meta.{"
+	topicMetaKeyPrefix    = "redmq.topic.{"
 	topicMetaKeyPrefixLen = len(topicMetaKeyPrefix)
-	topicMetaKeySuffix    = "}"
+	topicMetaKeySuffix    = "}.meta"
 	topicMetaKeySuffixLen = len(topicMetaKeySuffix)
 	topicMetaKeyPattern   = topicMetaKeyPrefix + "%s" + topicMetaKeySuffix
+
+	topicDLQKeyPrefix    = "redmq.topic.{"
+	topicDLQKeyPrefixLen = len(topicDLQKeyPrefix)
+	topicDLQKeySuffix    = "}.dlq"
+	topicDLQKeySuffixLen = len(topicDLQKeySuffix)
+	topicDLQKeyPattern   = topicDLQKeyPrefix + "%s" + topicDLQKeySuffix
 )
 
 func topicKey(topic string) string {
@@ -58,6 +61,13 @@ func topicMetaKey(topic string) string {
 	return fmt.Sprintf(topicMetaKeyPattern, topic)
 }
 
+func topicDLQKey(topic string) string {
+	if len(topic) == 0 {
+		panic("Topic cannot be empty")
+	}
+	return fmt.Sprintf(topicDLQKeyPattern, topic)
+}
+
 func topicKeys(topics []string) []string {
 	keys := make([]string, 0, len(topics))
 	for _, topic := range topics {
@@ -72,6 +82,22 @@ func topicMetaKeys(topics []string) []string {
 		keys = append(keys, topicMetaKey(topic))
 	}
 	return keys
+}
+
+func topicDLQKeys(topics []string) []string {
+	keys := make([]string, 0, len(topics))
+	for _, topic := range topics {
+		keys = append(keys, topicDLQKey(topic))
+	}
+	return keys
+}
+
+func topicRelatedKeys(topics ...string) []string {
+	r := make([]string, 0, len(topics)*3)
+	r = append(r, topicKeys(topics)...)
+	r = append(r, topicMetaKeys(topics)...)
+	r = append(r, topicDLQKeys(topics)...)
+	return r
 }
 
 func parseTopicKey(s string) (string, bool) {

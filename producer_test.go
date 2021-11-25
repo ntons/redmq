@@ -21,9 +21,9 @@ func TestProducer(t *testing.T) {
 		Name:            testProducerName,
 		AutoCreateTopic: true,
 		TopicOptions: &TopicOptions{
-			Topic:  testTopic,
-			MaxLen: 10,
+			Topic: testTopic,
 		},
+		MaxLen: 10,
 	})
 	if err != nil {
 		t.Fatalf("Failed to auto create topic when creating producer: %v", err)

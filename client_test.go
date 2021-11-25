@@ -11,6 +11,7 @@ import (
 
 const (
 	testTopic        = "my-test-topic"
+	testGroupID      = "my-test-group"
 	testProducerName = "my-test-producer"
 )
 
@@ -105,9 +106,9 @@ func TestClientCreateProducer(t *testing.T) {
 		Name:            testProducerName,
 		AutoCreateTopic: true, // notice
 		TopicOptions: &TopicOptions{
-			Topic:  testTopic,
-			MaxLen: 10,
+			Topic: testTopic,
 		},
+		MaxLen: 10,
 	}); err != nil {
 		t.Fatalf("Failed to auto create topic when creating producer: %v", err)
 	}

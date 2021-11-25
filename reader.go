@@ -10,8 +10,8 @@ import (
 )
 
 const (
-	ReaderCursorBegin = "0"
-	ReaderCursorEnd   = "$"
+	PositionBegin = "0"
+	PositionEnd   = "$"
 )
 
 type ReaderOptions struct {
@@ -31,8 +31,8 @@ type Reader interface {
 	Seek(string)
 	SeekByTime(time.Time)
 
-	Receive(context.Context, int64) ([]Message, error)
-	Chan(context.Context, int64) <-chan ReaderMessage
+	Receive(context.Context, int) ([]Message, error)
+	Chan(context.Context, int) <-chan ReaderMessage
 }
 
 var _ Reader = (*reader)(nil)
@@ -51,7 +51,7 @@ func newReader(rdb redis.Cmdable, opts *ReaderOptions) (_ Reader, err error) {
 	r := &reader{
 		Cmdable:       rdb,
 		ReaderOptions: opts,
-		cursor:        ReaderCursorBegin,
+		cursor:        PositionBegin,
 	}
 	return r, nil
 }
@@ -68,10 +68,10 @@ func (r *reader) SeekByTime(t time.Time) {
 	r.cursor = fmt.Sprintf("%d%03d-0", t.Second(), t.Nanosecond()/1e6)
 }
 
-func (r *reader) Receive(ctx context.Context, batchSize int64) (_ []Message, err error) {
+func (r *reader) Receive(ctx context.Context, batchSize int) (_ []Message, err error) {
 	args := &redis.XReadArgs{
 		Streams: []string{topicKey(r.Topic()), r.cursor},
-		Count:   batchSize,
+		Count:   int64(batchSize),
 	}
 	if deadline, ok := ctx.Deadline(); ok {
 		args.Block = time.Until(deadline)
@@ -92,7 +92,7 @@ func (r *reader) Receive(ctx context.Context, batchSize int64) (_ []Message, err
 				log.Warnf("redmq.Reader: nil message found, topic=%v, id=%v", r.Topic(), e2.ID)
 				continue
 			}
-			m, err := parseMessage(r.Topic(), e2.ID, e2.Values)
+			m, err := parseMessage(MessageTypeNormal, r.Topic(), e2.ID, e2.Values)
 			if err != nil {
 				log.Warnf("redmq.Reader: bad message found, topic=%v, id=%v, %v", r.Topic(), e2.ID, err)
 				continue
@@ -103,14 +103,20 @@ func (r *reader) Receive(ctx context.Context, batchSize int64) (_ []Message, err
 	return ret, nil
 }
 
-func (r *reader) Chan(ctx context.Context, batchSize int64) <-chan ReaderMessage {
-	ch := make(chan ReaderMessage, 1)
+func (r *reader) Chan(ctx context.Context, batchSize int) <-chan ReaderMessage {
+	ch := make(chan ReaderMessage, batchSize)
 	go func() {
 		defer func() { close(ch) }()
 		for {
-			arr, err := r.Receive(ctx, 1)
+			arr, err := r.Receive(ctx, batchSize)
 			if err != nil {
-				return
+				log.Warnf("redmq.Reader: failed to receive: %v", err)
+				select {
+				case <-ctx.Done():
+					return
+				case <-time.After(time.Second):
+					continue
+				}
 			}
 			for _, m := range arr {
 				ch <- ReaderMessage{r, m}

@@ -25,14 +25,12 @@ type Producer interface {
 type producer struct {
 	redis.Cmdable
 	*ProducerOptions
-	*topicMeta
 }
 
-func newProducer(rdb redis.Cmdable, opts *ProducerOptions, topicMeta *topicMeta) (p Producer, err error) {
+func newProducer(rdb redis.Cmdable, opts *ProducerOptions) (p Producer, err error) {
 	return &producer{
 		Cmdable:         rdb,
 		ProducerOptions: opts,
-		topicMeta:       topicMeta,
 	}, nil
 }
 
@@ -53,8 +51,8 @@ func (p *producer) Send(ctx context.Context, msg *ProducerMessage) (_ string, er
 		Stream: topicKey(p.Topic()),
 		Values: m.toValues(),
 	}
-	if p.topicMeta.MaxLen > 0 {
-		args.MaxLen = p.topicMeta.MaxLen
+	if p.MaxLen > 0 {
+		args.MaxLen = p.MaxLen
 		args.Approx = true
 	}
 
@@ -87,17 +85,8 @@ type ProducerOptions struct {
 	// TopicOptions specify the options for AutoCreateTopic
 	*TopicOptions
 
-	// CompressionType set the compression type for the producer.
-	// By default, message payloads are not compressed. Supported compression types are:
-	// - LZ4
-	// - ZLIB
-	CompressionType
-
-	// Define the desired compression level. Options:
-	// - Default
-	// - Faster
-	// - Better
-	CompressionLevel
+	// MaxLen specify the max size of topic retentions
+	MaxLen int64 `json:"max_len,omitempty"`
 }
 
 func (o *ProducerOptions) getTopicOptions() *TopicOptions {

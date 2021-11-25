@@ -58,8 +58,7 @@ func (c *client) DeleteTopics(ctx context.Context, topics ...string) (err error)
 	if len(topics) == 0 {
 		return
 	}
-	keys := append(topicKeys(topics), topicMetaKeys(topics)...)
-	err = c.Del(ctx, keys...).Err()
+	err = c.Del(ctx, topicRelatedKeys(topics...)...).Err()
 	return
 }
 
@@ -77,18 +76,17 @@ func (c *client) ListTopics(ctx context.Context) (topics []string, err error) {
 }
 
 func (c *client) CreateProducer(ctx context.Context, opts *ProducerOptions) (_ Producer, err error) {
-	meta, err := c.getTopicMeta(ctx, opts.Topic, opts.getTopicOptions())
-	if err != nil {
+	if _, err = c.getTopicMeta(ctx, opts.Topic, opts.getTopicOptions()); err != nil {
 		return
 	}
-	return newProducer(c.Cmdable, opts, meta)
+	return newProducer(c.Cmdable, opts)
 }
 
 func (c *client) Subscribe(ctx context.Context, opts *ConsumerOptions) (_ Consumer, err error) {
 	if _, err = c.getTopicMeta(ctx, opts.Topic, opts.getTopicOptions()); err != nil {
 		return
 	}
-	return newConsumer(c.Cmdable, opts)
+	return newConsumer(ctx, c.Cmdable, opts)
 }
 
 func (c *client) CreateReader(ctx context.Context, opts *ReaderOptions) (_ Reader, err error) {

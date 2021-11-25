@@ -3,9 +3,11 @@ package redmq
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/go-redis/redis/v8"
+	"github.com/ntons/log-go"
 )
 
 type ConsumerMessage struct {
@@ -13,158 +15,251 @@ type ConsumerMessage struct {
 	Message
 }
 
-type Consumer interface {
-	// Name returns the name of consumer.
-	Name() string
+func (cm *ConsumerMessage) Ack(ctx context.Context) error {
+	return cm.Consumer.Ack(ctx, cm.Message)
+}
 
+type Consumer interface {
 	// Topic returns the subscribed topic
 	Topic() string
 
 	// GroupID returns the subscription group id
 	GroupID() string
 
+	// Name returns the name of consumer.
+	Name() string
+
 	// Unsubscribe the consumer
-	Unsubscribe() error
+	Unsubscribe(context.Context) error
 
 	// Receive a single message.
 	// This calls blocks until a message is available.
-	Receive(context.Context) (Message, error)
+	Receive(context.Context, int) ([]Message, error)
 
 	// Chan returns a channel to consume messages from
-	Chan() <-chan ConsumerMessage
+	Chan(context.Context, int) <-chan ConsumerMessage
 
 	// Ack the consumption of a single message
-	Ack(Message)
+	Ack(context.Context, Message) error
 
 	// AckID the consumption of a single message, identified by its MessageID
-	AckID(string)
-
-	// ReconsumeLater mark a message for redelivery after custom delay
-	ReconsumeLater(msg Message, delay time.Duration)
-
-	// Acknowledge the failure to process a single message.
-	//
-	// When a message is "negatively acked" it will be marked for redelivery after
-	// some fixed delay. The delay is configurable when constructing the consumer
-	// with ConsumerOptions.NAckRedeliveryDelay .
-	//
-	// This call is not blocking.
-	Nack(Message)
-
-	// Acknowledge the failure to process a single message.
-	//
-	// When a message is "negatively acked" it will be marked for redelivery after
-	// some fixed delay. The delay is configurable when constructing the consumer
-	// with ConsumerOptions.NackRedeliveryDelay .
-	//
-	// This call is not blocking.
-	NackID(string)
+	AckID(context.Context, string) error
 
 	// Close the consumer and stop the broker to push more messages
 	Close()
-
-	// Reset the subscription associated with this consumer to a specific message id.
-	// The message id can either be a specific message or represent the first or last messages in the topic.
-	//
-	// Note: this operation can only be done on non-partitioned topics. For these, one can rather perform the
-	//       seek() on the individual partitions.
-	Seek(string) error
-
-	// Reset the subscription associated with this consumer to a specific message publish time.
-	//
-	// Note: this operation can only be done on non-partitioned topics. For these, one can rather perform the seek() on
-	// the individual partitions.
-	//
-	// @param timestamp
-	//            the message publish time where to reposition the subscription
-	//
-	SeekByTime(time time.Time) error
 }
 
 type consumer struct {
 	redis.Cmdable
 	*ConsumerOptions
+
+	pendingReceived bool
 }
 
-func newConsumer(rdb redis.Cmdable, opts *ConsumerOptions) (Consumer, error) {
+func newConsumer(ctx context.Context, rdb redis.Cmdable, opts *ConsumerOptions) (_ Consumer, err error) {
 	if len(opts.Topic) == 0 {
-		return nil, fmt.Errorf("Topic(s) must be specified")
+		return nil, fmt.Errorf("Consumer Topic must be specified")
 	}
 	if len(opts.Name) == 0 {
-		return nil, fmt.Errorf("Consumer name must be specified")
+		return nil, fmt.Errorf("Consumer Name must be specified")
 	}
-	return &consumer{
+	if len(opts.GroupID) == 0 {
+		return nil, fmt.Errorf("Consumer GroupID must be specified")
+	}
+	c := &consumer{
 		Cmdable:         rdb,
 		ConsumerOptions: opts,
-	}, nil
+	}
+	// Create group
+	if err = c.XGroupCreate(ctx, topicKey(c.Topic()), c.GroupID(), c.InitalialPosition).Err(); err != nil {
+		if !strings.HasPrefix(strings.TrimLeft(err.Error(), " "), "BUSYGROUP") {
+			return nil, fmt.Errorf("redmq.Consumer: failed to create consumer group: %v", err)
+		}
+		err = nil // already exists
+	}
+	return c, nil
 }
-
-func (c *consumer) Name() string { return c.ConsumerOptions.Name }
 
 func (c *consumer) Topic() string { return c.ConsumerOptions.Topic }
 
+func (c *consumer) Name() string { return c.ConsumerOptions.Name }
+
 func (c *consumer) GroupID() string { return c.ConsumerOptions.GroupID }
 
-func (c *consumer) Unsubscribe() error {
-	// TODO 明确地取消注册，把pending messages给别人，删除consumer
-	return nil
-}
-
-func (c *consumer) Receive(ctx context.Context) (_ Message, err error) {
-	// Create group
-	if err = c.XGroupCreate(
-		ctx, c.Topic(), c.GroupID(), "0").Err(); err != nil {
+func (c *consumer) Unsubscribe(ctx context.Context) (err error) {
+	if err = c.XGroupDelConsumer(ctx, topicKey(c.Topic()), c.GroupID(), c.Name()).Err(); err != nil {
 		return
 	}
+	return
+}
 
-	// Read group
+func (c *consumer) recvPending(ctx context.Context, batchSize int) (_ []redis.XStream, err error) {
+	if c.pendingReceived {
+		return
+	}
 	args := &redis.XReadGroupArgs{
 		Group:    c.GroupID(),
 		Consumer: c.Name(),
-		Streams:  []string{c.Topic(), ">"},
-		Count:    1,
+		Streams:  []string{topicKey(c.Topic()), "0"},
+		Count:    int64(batchSize),
+	}
+	res, err := c.XReadGroup(ctx, args).Result()
+	if err != nil {
+		return nil, fmt.Errorf("redmq.Consumer: failed to read pending message: %v", err)
+	}
+	if len(res) == 0 {
+		c.pendingReceived = true
+	}
+	return res, nil
+}
+
+func (c *consumer) recvRetry(ctx context.Context, batchSize int) (_ []redis.XStream, err error) {
+	if c.DeadLetterPolicy == nil {
+		return
+	}
+
+	// TODO policy for retry and dlq process
+
+	v, err := c.Eval(
+		ctx,
+		luaRetryDeadLetter,
+		[]string{topicKey(c.Topic())},
+		c.GroupID(),
+		c.Name(),
+		c.DeliveryTimeout,
+		c.MaxDeadLetterQueueLen,
+		c.MaxRetries,
+		batchSize,
+	).Result()
+	if err != nil {
+		return nil, fmt.Errorf("redmq.Consumer: failed to retry dead letter: %v", err)
+	}
+
+	r := redis.XStream{
+		Stream: topicKey(c.Topic()),
+	}
+	for _, a := range v.([]interface{}) {
+		a1 := a.([]interface{})
+		m := redis.XMessage{
+			ID:     a1[0].(string),
+			Values: make(map[string]interface{}),
+		}
+		a2 := a1[1].([]interface{})
+		for i := 1; i < len(a2); i += 2 {
+			m.Values[a2[i-1].(string)] = a2[i]
+		}
+		r.Messages = append(r.Messages, m)
+	}
+
+	return []redis.XStream{r}, nil
+}
+
+func (c *consumer) recvNormal(ctx context.Context, batchSize int) ([]redis.XStream, error) {
+	args := &redis.XReadGroupArgs{
+		Group:    c.GroupID(),
+		Consumer: c.Name(),
+		Streams:  []string{topicKey(c.Topic()), ">"},
+		Count:    int64(batchSize),
 	}
 	if deadline, ok := ctx.Deadline(); ok {
 		args.Block = time.Until(deadline)
+	} else {
+		args.Block = 0
 	}
+	return c.XReadGroup(ctx, args).Result()
+}
 
-	r, err := c.XReadGroup(ctx, args).Result()
-	if err != nil {
+func (c *consumer) Receive(ctx context.Context, batchSize int) (_ []Message, err error) {
+	var (
+		t = MessageTypePending
+		a []redis.XStream
+	)
+	if a, err = c.recvPending(ctx, batchSize); err != nil {
 		return
 	}
-	fmt.Println(r)
+	if len(a) == 0 {
+		t = MessageTypeRetry
+		if a, err = c.recvRetry(ctx, batchSize); err != nil {
+			return
+		}
+	}
+	if len(a) == 0 {
+		t = MessageTypeNormal
+		if a, err = c.recvNormal(ctx, batchSize); err != nil {
+			return
+		}
+	}
 
-	return nil, nil
+	r := make([]Message, 0, len(a))
+	for _, e1 := range a {
+		for _, e2 := range e1.Messages {
+			if e2.Values == nil {
+				log.Warnf("redmq.Consumer: nil message found, topic=%v, id=%v", c.Topic(), e2.ID)
+				continue
+			}
+			m, err := parseMessage(t, c.Topic(), e2.ID, e2.Values)
+			if err != nil {
+				log.Warnf("redmq.Consumer: bad message found, topic=%v, id=%v, %v", c.Topic(), e2.ID, err)
+				continue
+			}
+			r = append(r, m)
+		}
+	}
+
+	return r, nil
 }
 
-func (c *consumer) Chan() <-chan ConsumerMessage {
-	return nil
+func (c *consumer) Chan(ctx context.Context, batchSize int) <-chan ConsumerMessage {
+	ch := make(chan ConsumerMessage, batchSize)
+	go func() {
+		defer func() { close(ch) }()
+		for {
+			arr, err := c.Receive(ctx, batchSize)
+			if err != nil {
+				log.Warnf("redmq.Consumer: failed to receive: %v", err)
+				select {
+				case <-ctx.Done():
+					return
+				case <-time.After(time.Second):
+					continue
+				}
+			}
+			for _, m := range arr {
+				ch <- ConsumerMessage{c, m}
+			}
+		}
+	}()
+	return ch
 }
 
-func (c *consumer) Ack(Message) {
+func (c *consumer) Ack(ctx context.Context, m Message) (err error) {
+	return c.AckID(ctx, m.ID())
 }
 
-func (c *consumer) AckID(string) {
-}
-
-func (c *consumer) ReconsumeLater(msg Message, delay time.Duration) {
-}
-
-func (c *consumer) Nack(Message) {
-}
-
-func (c *consumer) NackID(string) {
+func (c *consumer) AckID(ctx context.Context, id string) (err error) {
+	if err = c.XAck(ctx, topicKey(c.Topic()), c.GroupID(), id).Err(); err != nil {
+		return fmt.Errorf("redmq.Consumer: failed to acknowledge message: %v", err)
+	}
+	return
 }
 
 func (c *consumer) Close() {
 }
 
-func (c *consumer) Seek(string) error {
-	return nil
-}
+// 死信、重试
+// 首先要明白，只要投递超时，即认为该消息为死信。
+// 重试是一种死信处理机制，给死信复活的机会。
+// 在超过重试次数之后，采用兜底策略扔进死信队列。
+type DeadLetterPolicy struct {
+	// Acknowledge timeout duration
+	DeliveryTimeout time.Duration
 
-func (c *consumer) SeekByTime(time time.Time) error {
-	return nil
+	// Max length of Dead Letter Queue
+	MaxDeadLetterQueueLen int64
+
+	// Max retries before put into DLQ
+	// By default, 0, which disables retry
+	MaxRetries int32
 }
 
 type ConsumerOptions struct {
@@ -176,88 +271,24 @@ type ConsumerOptions struct {
 	// Either a topic, a list of topics or a topics pattern are required when subscribing
 	//Topics []string
 
-	// Specify a regular expression to subscribe to multiple topics under the same namespace.
-	// Either a topic, a list of topics or a topics pattern are required when subscribing
-	//TopicsPattern string
-
 	// AutoCreateTopic specify creating topic if not exists
 	AutoCreateTopic bool
 
 	*TopicOptions
-
-	// Specify the interval in which to poll for new partitions or new topics if using a TopicsPattern.
-	AutoDiscoveryPeriod time.Duration
 
 	// Specify the subscription name for this consumer
 	// This argument is required when subscribing
 	//SubscriptionName string
 	GroupID string
 
-	// Attach a set of application defined properties to the consumer
-	// This properties will be visible in the topic stats
-	Properties map[string]string
-
-	// Select the subscription type to be used when subscribing to the topic.
-	// Default is `Exclusive`
-	Type SubscriptionType
-
-	// InitialPosition at which the cursor will be set when subscribe
-	// Default is `Latest`
-	SubscriptionInitialPosition
-
-	// Configuration for Dead Letter Queue consumer policy.
-	// eg. route the message to topic X after N failed attempts at processing it
-	// By default is nil and there's no DLQ
-	//DLQ *DLQPolicy
-
-	// Configuration for Key Shared consumer policy.
-	//KeySharedPolicy *KeySharedPolicy
-
-	// Auto retry send messages to default filled DLQPolicy topics
-	// Default is false
-	RetryEnable bool
-
-	// Sets a `MessageChannel` for the consumer
-	// When a message is received, it will be pushed to the channel for consumption
-	//MessageChannel chan ConsumerMessage
-
-	// Sets the size of the consumer receive queue.
-	// The consumer receive queue controls how many messages can be accumulated by the `Consumer` before the
-	// application calls `Consumer.receive()`. Using a higher value could potentially increase the consumer
-	// throughput at the expense of bigger memory utilization.
-	// Default value is `1000` messages and should be good for most use cases.
-	ReceiverQueueSize int
-
-	// The delay after which to redeliver the messages that failed to be
-	// processed. Default is 1min. (See `Consumer.Nack()`)
-	NackRedeliveryDelay time.Duration
+	//
+	InitalialPosition string
 
 	// Set the consumer name.
 	Name string
 
-	// If enabled, the consumer will read messages from the compacted topic rather than reading the full message backlog
-	// of the topic. This means that, if the topic has been compacted, the consumer will only see the latest value for
-	// each key in the topic, up until the point in the topic message backlog that has been compacted. Beyond that
-	// point, the messages will be sent as normal.
-	//
-	// ReadCompacted can only be enabled subscriptions to persistent topics, which have a single active consumer (i.e.
-	//  failure or exclusive subscriptions). Attempting to enable it on subscriptions to a non-persistent topics or on a
-	//  shared subscription, will lead to the subscription call throwing a PulsarClientException.
-	ReadCompacted bool
-
-	// Mark the subscription as replicated to keep it in sync across clusters
-	ReplicateSubscriptionState bool
-
-	// A chain of interceptors, These interceptors will be called at some points defined in ConsumerInterceptor interface.
-	//Interceptors ConsumerInterceptors
-
-	//Schema Schema
-
-	// MaxReconnectToBroker set the maximum retry number of reconnectToBroker. (default: ultimate)
-	MaxReconnectToBroker *uint
-
-	// Decryption decryption related fields to decrypt the encrypted message
-	//Decryption *MessageDecryptionInfo
+	// Dead letter and retry policy
+	*DeadLetterPolicy
 }
 
 func (o *ConsumerOptions) getTopicOptions() *TopicOptions {
@@ -266,3 +297,35 @@ func (o *ConsumerOptions) getTopicOptions() *TopicOptions {
 	}
 	return nil
 }
+
+var (
+	// KEYS={
+	//   1:Stream,
+	// }
+	// ARGV={
+	//   1:Group,
+	//   2:Consumer,
+	//   3:MinIdleTime aka DeliveryTimeout,
+	//   4:MaxDeadLetterQueueLen,
+	//   5:MaxRetries,
+	//   6:MaxClaims,
+	// }
+	//
+	// XPENDING-1 O(1)      summary only
+	// XPENDING-2 O(N)
+	// XADD       O(1)
+	// XACK       O(1)
+	// XDEL       O(1)
+	// XCLAIM     O(logN)
+	luaRetryDeadLetter = `
+local K,G,A2,A3,A4,A5,A6=KEYS[1],ARGV[1],ARGV[2],tonumber(ARGV[3]),tonumber(ARGV[4]),tonumber(ARGV[5]),tonumber(ARGV[6])
+local r=redis.call("XPENDING",K,G)
+local a=redis.call("XPENDING",K,G,r[2],r[3],r[1])
+local dlq,rty={},{}
+for _,e in ipairs(a) do if e[3]>A3 then if e[4]>A5 then dlq[#dlq+1]=e[1] elseif #rty<A6 then rty[#rty+1]=e[1] end end end
+for _,e in ipairs(dlq) do redis.call("XADD",K..".dlq","MAXLEN","~",A4,"*","ID",e,unpack(redis.call("XRANGE",K,e,e)[1][2])) end
+if #dlq>0 then redis.call("XACK",K,G,unpack(dlq)) redis.call("XDEL",K,unpack(dlq)) end
+if #rty==0 then return {} end
+return redis.call("XCLAIM",K,G,A2,A3,unpack(rty))
+`
+)

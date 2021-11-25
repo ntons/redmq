@@ -21,9 +21,9 @@ func TestReader(t *testing.T) {
 		Name:            testProducerName,
 		AutoCreateTopic: true,
 		TopicOptions: &TopicOptions{
-			Topic:  testTopic,
-			MaxLen: 10,
+			Topic: testTopic,
 		},
+		MaxLen: 10,
 	})
 	if err != nil {
 		t.Fatalf("Failed to auto create topic when creating producer: %v", err)
@@ -56,7 +56,7 @@ func TestReader(t *testing.T) {
 	}
 
 	// reseek to the begin, and read all 10 message
-	reader.Seek(ReaderCursorBegin)
+	reader.Seek(PositionBegin)
 	if res, err := reader.Receive(ctx, 100); err != nil {
 		t.Fatalf("Failed to receive messages: %v", err)
 	} else if len(res) != 10 {

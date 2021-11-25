@@ -6,6 +6,19 @@ import (
 	"time"
 )
 
+type MessageType int
+
+const (
+	// Normal message type
+	MessageTypeNormal MessageType = iota
+
+	// Pending message which not been acked last time received
+	MessageTypePending
+
+	// Retry message claimed from another consumer
+	MessageTypeRetry
+)
+
 type Message interface {
 	// Topic get the topic from which this message originated from
 	Topic() string
@@ -32,6 +45,8 @@ type Message interface {
 	// `ProducerMessage.EventTime`.
 	// If EventTime is 0, it means there isn't any event time associated with this message.
 	EventTime() time.Time
+
+	Type() MessageType
 }
 
 type ProducerMessage struct {
@@ -50,9 +65,10 @@ type ProducerMessage struct {
 }
 
 type message struct {
-	XTopic   string `json:"-"`
-	XID      string `json:"-"`
-	XPayload []byte `json:"-"`
+	XTopic   string      `json:"-"`
+	XID      string      `json:"-"`
+	XPayload []byte      `json:"-"`
+	XType    MessageType `json:"-"`
 	// Serializable fields
 	XProducerName string            `json:"producer_name,omitempty"`
 	XPublishTime  time.Time         `json:"publish_time,omitempty"`
@@ -60,7 +76,7 @@ type message struct {
 	XProperties   map[string]string `json:"properties,omitempty"`
 }
 
-func parseMessage(topic, id string, values map[string]interface{}) (_ Message, err error) {
+func parseMessage(mtype MessageType, topic, id string, values map[string]interface{}) (_ Message, err error) {
 	var m message
 	// parse metadata
 	if v, ok := values["METADATA"]; ok {
@@ -112,3 +128,5 @@ func (m *message) Payload() []byte { return m.XPayload }
 func (m *message) PublishTime() time.Time { return m.XPublishTime }
 
 func (m *message) EventTime() time.Time { return m.XEventTime }
+
+func (m *message) Type() MessageType { return m.XType }
