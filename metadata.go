@@ -6,23 +6,43 @@ import (
 	"time"
 )
 
-// TopicOptions specify the options on creating a topic
-type TopicOptions struct {
-	// Topic specify the topic identifier
-	Topic string `json:"topic,omitempty"`
-}
+const (
+	topicMetaField        = "topic"
+	groupMetaFieldPattern = "g-%s"
+)
 
-// topicMeta specify the metadata of a topic and be saved along with topic
-type topicMeta struct {
-	*TopicOptions
-	CreateAt time.Time `json:"create_at,omitempty"`
-}
+type (
+	// TopicOptions specify the options on creating a topic
+	TopicOptions struct {
+		// Topic specify the topic identifier
+		Topic string `json:"topic"`
+	}
+
+	// topicMeta specify the metadata of a topic and be saved along with topic
+	topicMeta struct {
+		*TopicOptions
+		CreateAt int64 `json:"create-at"`
+	}
+
+	groupMeta struct {
+		CreateAt   int64 `json:"create-at"`
+		EmptySince int64 `json:"empty-since"`
+	}
+)
 
 // newTopicMeta creates a topicMeta from TopicOptions
 func newTopicMeta(topicOptions *TopicOptions) *topicMeta {
 	return &topicMeta{
 		TopicOptions: topicOptions,
-		CreateAt:     time.Now(),
+		CreateAt:     time.Now().UnixNano() / 1e6,
+	}
+}
+
+func newGroupMeta() *groupMeta {
+	t := time.Now().UnixNano() / 1e6
+	return &groupMeta{
+		CreateAt:   t,
+		EmptySince: t,
 	}
 }
 

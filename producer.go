@@ -86,7 +86,7 @@ type ProducerOptions struct {
 	*TopicOptions
 
 	// MaxLen specify the max size of topic retentions
-	MaxLen int64 `json:"max_len,omitempty"`
+	MaxLen int64
 }
 
 func (o *ProducerOptions) getTopicOptions() *TopicOptions {

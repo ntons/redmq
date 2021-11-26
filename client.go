@@ -111,7 +111,7 @@ func (c *client) createTopic(ctx context.Context, opts *TopicOptions) (_ *topicM
 		return nil, fmt.Errorf("failed to marshal topic options")
 	}
 
-	ok, err := c.SetNX(ctx, topicMetaKey(opts.Topic), b, 0).Result()
+	ok, err := c.HSetNX(ctx, topicMetaKey(opts.Topic), topicMetaField, b).Result()
 	if err != nil {
 		return
 	}
@@ -135,7 +135,7 @@ func (c *client) getTopicMeta(ctx context.Context, topic string, opts *TopicOpti
 		}
 	} else {
 		var b []byte
-		if b, err = c.Get(ctx, topicMetaKey(topic)).Bytes(); err != nil {
+		if b, err = c.HGet(ctx, topicMetaKey(topic), topicMetaField).Bytes(); err != nil {
 			if err == redis.Nil {
 				err = TopicNotFoundError
 			}

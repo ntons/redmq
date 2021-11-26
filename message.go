@@ -70,9 +70,9 @@ type message struct {
 	XPayload []byte      `json:"-"`
 	XType    MessageType `json:"-"`
 	// Serializable fields
-	XProducerName string            `json:"producer_name,omitempty"`
-	XPublishTime  time.Time         `json:"publish_time,omitempty"`
-	XEventTime    time.Time         `json:"event_time,omitempty"`
+	XProducerName string            `json:"producer-name,omitempty"`
+	XPublishTime  time.Time         `json:"publish-time,omitempty"`
+	XEventTime    time.Time         `json:"event-time,omitempty"`
 	XProperties   map[string]string `json:"properties,omitempty"`
 }
 
