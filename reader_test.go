@@ -16,11 +16,11 @@ func TestReader(t *testing.T) {
 		t.Fatalf("Failed to init test")
 	}
 
-	producer, err := client.CreateProducer(ctx, &ProducerOptions{
+	producer, err := client.CreateProducer(ctx, ProducerOptions{
 		Topic:           testTopic,
 		Name:            testProducerName,
 		AutoCreateTopic: true,
-		TopicOptions: &TopicOptions{
+		TopicOptions: TopicOptions{
 			Topic: testTopic,
 		},
 		MaxLen: 10,
@@ -40,7 +40,7 @@ func TestReader(t *testing.T) {
 	}
 
 	// test creating a reader
-	reader, err := client.CreateReader(ctx, &ReaderOptions{
+	reader, err := client.CreateReader(ctx, ReaderOptions{
 		Topic: testTopic,
 	})
 	if err != nil {

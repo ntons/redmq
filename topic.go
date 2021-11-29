@@ -6,9 +6,16 @@ import (
 	"time"
 )
 
+// my-topic.meta: {
+//   topic:                     *topicMeta // set when topic created, never change
+//   topic-idle-since:          int64      // update when add or read or read group
+//   group-my-group-idle-since: int64      // update when read group
+// }
+
 const (
-	topicMetaField        = "topic"
-	groupMetaFieldPattern = "g-%s"
+	topicMetaField             = "topic"
+	topicIdleSinceField        = "topic-idle-since"
+	groupIdleSinceFieldPattern = "group-%s-idle-since"
 )
 
 type (
@@ -16,6 +23,18 @@ type (
 	TopicOptions struct {
 		// Topic specify the topic identifier
 		Topic string `json:"topic"`
+
+		// min interval between shrinks
+		MinShrinkInterval int64 `json:"min-shrink-interval"`
+
+		// min idle time before delete a topic
+		DeleteIdleTopicAfter int64 `json:"delete-idle-topic-after"`
+
+		// min empty time before delete a group
+		DeleteIdleGroupAfter int64 `json:"delete-idle-group-after"`
+
+		// min idle time before delete a consumer
+		DeleteIdleConsumerAfter int64 `json:"delete-idle-consumer-after"`
 	}
 
 	// topicMeta specify the metadata of a topic and be saved along with topic
@@ -23,27 +42,27 @@ type (
 		*TopicOptions
 		CreateAt int64 `json:"create-at"`
 	}
-
-	groupMeta struct {
-		CreateAt   int64 `json:"create-at"`
-		EmptySince int64 `json:"empty-since"`
-	}
 )
 
 // newTopicMeta creates a topicMeta from TopicOptions
 func newTopicMeta(topicOptions *TopicOptions) *topicMeta {
-	return &topicMeta{
-		TopicOptions: topicOptions,
+	r := &topicMeta{
+		TopicOptions: &(*topicOptions),
 		CreateAt:     time.Now().UnixNano() / 1e6,
 	}
-}
-
-func newGroupMeta() *groupMeta {
-	t := time.Now().UnixNano() / 1e6
-	return &groupMeta{
-		CreateAt:   t,
-		EmptySince: t,
+	if r.MinShrinkInterval <= 0 {
+		r.MinShrinkInterval = 1 * 3600 * 1000 // 1h
 	}
+	if r.DeleteIdleTopicAfter <= 0 {
+		r.DeleteIdleTopicAfter = 24 * 3600 * 1000 // 1d
+	}
+	if r.DeleteIdleGroupAfter <= 0 {
+		r.DeleteIdleGroupAfter = 3 * 3600 * 1000 // 3h
+	}
+	if r.DeleteIdleConsumerAfter <= 0 {
+		r.DeleteIdleConsumerAfter = 3 * 3600 * 1000 // 1h
+	}
+	return r
 }
 
 // Mapping topic or topicMeta to redis key
@@ -138,4 +157,8 @@ func parseTopicMetaKey(s string) (string, bool) {
 		return "", false
 	}
 	return s[topicMetaKeyPrefixLen : n-topicMetaKeySuffixLen], true
+}
+
+func groupIdleSinceField(s string) string {
+	return fmt.Sprintf(groupIdleSinceFieldPattern, s)
 }

@@ -16,11 +16,11 @@ func TestProducer(t *testing.T) {
 		t.Fatalf("Failed to init test")
 	}
 
-	producer, err := client.CreateProducer(ctx, &ProducerOptions{
+	producer, err := client.CreateProducer(ctx, ProducerOptions{
 		Topic:           testTopic,
 		Name:            testProducerName,
 		AutoCreateTopic: true,
-		TopicOptions: &TopicOptions{
+		TopicOptions: TopicOptions{
 			Topic: testTopic,
 		},
 		MaxLen: 10,

@@ -49,21 +49,6 @@ type Message interface {
 	Type() MessageType
 }
 
-type ProducerMessage struct {
-	// Payload for the message
-	Payload []byte
-
-	// Properties attach application defined properties on the message
-	Properties map[string]string
-
-	// EventTime set the event time for a given message
-	// By default, messages don't have an event time associated, while the publish
-	// time will be be always present.
-	// Set the event time to a non-zero timestamp to explicitly declare the time
-	// that the event "happened", as opposed to when the message is being published.
-	EventTime time.Time
-}
-
 type message struct {
 	XTopic   string      `json:"-"`
 	XID      string      `json:"-"`
@@ -77,7 +62,7 @@ type message struct {
 }
 
 func parseMessage(mtype MessageType, topic, id string, values map[string]interface{}) (_ Message, err error) {
-	var m message
+	var m = message{XType: mtype}
 	// parse metadata
 	if v, ok := values["METADATA"]; ok {
 		s, ok := v.(string)
@@ -101,15 +86,12 @@ func parseMessage(mtype MessageType, topic, id string, values map[string]interfa
 	return &m, nil
 }
 
-func (m *message) toValues() map[string]interface{} {
+func (m *message) toValues() []interface{} {
 	b, err := json.Marshal(m)
 	if err != nil {
 		panic(fmt.Errorf("Failed to marshal message"))
 	}
-	return map[string]interface{}{
-		"METADATA": b,
-		"PAYLOAD":  m.XPayload,
-	}
+	return []interface{}{"METADATA", b, "PAYLOAD", m.XPayload}
 }
 
 // Implement Message interface

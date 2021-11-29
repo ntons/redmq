@@ -93,7 +93,7 @@ func TestClientCreateProducer(t *testing.T) {
 		return
 	}
 
-	if _, err = client.CreateProducer(ctx, &ProducerOptions{
+	if _, err = client.CreateProducer(ctx, ProducerOptions{
 		Topic:           testTopic,
 		Name:            testProducerName,
 		AutoCreateTopic: false, // notice
@@ -101,11 +101,11 @@ func TestClientCreateProducer(t *testing.T) {
 		t.Fatalf("Create producer with auto create topic expect fail but not: %v", err)
 	}
 
-	if _, err = client.CreateProducer(ctx, &ProducerOptions{
+	if _, err = client.CreateProducer(ctx, ProducerOptions{
 		Topic:           testTopic,
 		Name:            testProducerName,
 		AutoCreateTopic: true, // notice
-		TopicOptions: &TopicOptions{
+		TopicOptions: TopicOptions{
 			Topic: testTopic,
 		},
 		MaxLen: 10,
