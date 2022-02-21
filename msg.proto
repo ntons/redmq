@@ -1,0 +1,17 @@
+syntax = "proto3";
+
+package redmq;
+
+option go_package = ".;redmq";
+
+import "google/protobuf/any.proto";
+
+message Msg {
+    string topic = 1;
+    string id = 2;
+    string producer_name = 3;
+    int64 event_time = 4;
+    int64 publish_time = 5;
+    google.protobuf.Any value = 10;
+    map<string, string> properties = 11;
+}
