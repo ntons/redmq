@@ -12,6 +12,10 @@ message Msg {
     string producer_name = 3;
     int64 event_time = 4;
     int64 publish_time = 5;
-    google.protobuf.Any value = 10;
-    map<string, string> properties = 11;
+    map<string, string> properties = 10;
+    oneof value {
+        bytes binary_value = 11;
+        string string_value = 12;
+        google.protobuf.Any proto_value = 13;
+    }
 }
