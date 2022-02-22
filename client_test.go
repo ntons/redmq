@@ -34,12 +34,16 @@ func TestSendRead(t *testing.T) {
 	defer cancel()
 
 	for i := 0; i < 12; i++ {
-		if err := cli.Send(ctx, &Msg{
-			Topic:        topic,
-			ProducerName: "test-producer",
-			EventTime:    time.Now().UnixNano() / 1e6,
-			Properties:   map[string]string{"foo": fmt.Sprintf("%d", i)},
-		}, 10); err != nil {
+		if err := cli.Send(
+			ctx,
+			&Msg{
+				Topic:        topic,
+				ProducerName: "test-producer",
+				EventTime:    time.Now().UnixNano() / 1e6,
+				Properties:   map[string]string{"foo": fmt.Sprintf("%d", i)},
+			},
+			WithMaxLen(10), WithAutoCreate(),
+		); err != nil {
 			t.Errorf("failed to send: %v", err)
 		}
 	}
@@ -83,12 +87,16 @@ func TestWatch(t *testing.T) {
 	go func() {
 		defer wg.Done()
 		for i := 0; i < 12; i++ {
-			if err := cli.Send(ctx, &Msg{
-				Topic:        topic1,
-				ProducerName: "test-producer",
-				EventTime:    time.Now().UnixNano() / 1e6,
-				Properties:   map[string]string{"foo": fmt.Sprintf("%d", i)},
-			}, 10); err != nil {
+			if err := cli.Send(
+				ctx,
+				&Msg{
+					Topic:        topic1,
+					ProducerName: "test-producer",
+					EventTime:    time.Now().UnixNano() / 1e6,
+					Properties:   map[string]string{"foo": fmt.Sprintf("%d", i)},
+				},
+				WithMaxLen(10), WithAutoCreate(),
+			); err != nil {
 				t.Errorf("failed to send: %v", err)
 			}
 			<-time.After(time.Duration(rand.Int63n(100)) * time.Millisecond)
@@ -99,12 +107,16 @@ func TestWatch(t *testing.T) {
 	go func() {
 		defer wg.Done()
 		for i := 0; i < 12; i++ {
-			if err := cli.Send(ctx, &Msg{
-				Topic:        topic2,
-				ProducerName: "test-producer",
-				EventTime:    time.Now().UnixNano() / 1e6,
-				Properties:   map[string]string{"foo": fmt.Sprintf("%d", i)},
-			}, 10); err != nil {
+			if err := cli.Send(
+				ctx,
+				&Msg{
+					Topic:        topic2,
+					ProducerName: "test-producer",
+					EventTime:    time.Now().UnixNano() / 1e6,
+					Properties:   map[string]string{"foo": fmt.Sprintf("%d", i)},
+				},
+				WithMaxLen(10), WithAutoCreate(),
+			); err != nil {
 				t.Errorf("failed to send: %v", err)
 			}
 			<-time.After(time.Duration(rand.Int63n(100)) * time.Millisecond)

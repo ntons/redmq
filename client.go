@@ -12,7 +12,7 @@ import (
 )
 
 type Client interface {
-	Send(ctx context.Context, msg *Msg, maxLen int64) error
+	Send(ctx context.Context, msg *Msg, opts ...SendOption) error
 
 	Read(ctx context.Context, count int64, topicCursorPairs ...string) ([]*Msg, error)
 
@@ -38,17 +38,23 @@ func New(db redis.Client) Client {
 	}
 }
 
-func (cli *client) Send(ctx context.Context, _msg *Msg, maxLen int64) (err error) {
+func (cli *client) Send(ctx context.Context, _msg *Msg, opts ...SendOption) (err error) {
+	o := &sendOptions{}
+	for _, opt := range opts {
+		opt.apply(o)
+	}
+
 	msg := proto.Clone(_msg).(*Msg)
 	msg.Id = ""
 	msg.PublishTime = time.Now().Unix() / 1e6
 
 	args := &redis.XAddArgs{
-		Stream: msg.Topic,
-		Values: encMsg(msg),
+		Stream:     msg.Topic,
+		Values:     encMsg(msg),
+		NoMkStream: !o.autoCreate,
 	}
-	if maxLen > 0 {
-		args.MaxLen, args.Approx = maxLen, true
+	if o.maxLen > 0 {
+		args.MaxLen, args.Approx = o.maxLen, true
 	}
 
 	if err = cli.db.XAdd(ctx, args).Err(); err != nil {
@@ -121,6 +127,10 @@ func (cli *client) Watch(ctx context.Context, topic, cursor string, callback fun
 			callback(msg)
 		}
 	}
+}
+
+func (cli *client) WatchChan(ctx context.Context, topic, cursor string, ch chan<- *Msg) (err error) {
+	return cli.Watch(ctx, topic, cursor, func(msg *Msg) { ch <- msg })
 }
 
 func (cli *client) Serve(ctx context.Context) {
