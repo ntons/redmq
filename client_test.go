@@ -42,7 +42,7 @@ func TestSendRead(t *testing.T) {
 				EventTime:    time.Now().UnixNano() / 1e6,
 				Properties:   map[string]string{"foo": fmt.Sprintf("%d", i)},
 			},
-			WithMaxLen(10), WithAutoCreate(),
+			WithMaxLen(10), WithAutoCreate(true),
 		); err != nil {
 			t.Errorf("failed to send: %v", err)
 		}
@@ -95,7 +95,7 @@ func TestWatch(t *testing.T) {
 					EventTime:    time.Now().UnixNano() / 1e6,
 					Properties:   map[string]string{"foo": fmt.Sprintf("%d", i)},
 				},
-				WithMaxLen(10), WithAutoCreate(),
+				WithMaxLen(10), WithAutoCreate(true),
 			); err != nil {
 				t.Errorf("failed to send: %v", err)
 			}
@@ -115,7 +115,7 @@ func TestWatch(t *testing.T) {
 					EventTime:    time.Now().UnixNano() / 1e6,
 					Properties:   map[string]string{"foo": fmt.Sprintf("%d", i)},
 				},
-				WithMaxLen(10), WithAutoCreate(),
+				WithMaxLen(10), WithAutoCreate(true),
 			); err != nil {
 				t.Errorf("failed to send: %v", err)
 			}

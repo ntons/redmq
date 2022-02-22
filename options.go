@@ -20,11 +20,13 @@ func (x maxLenOption) apply(o *sendOptions) {
 	o.maxLen = x.maxLen
 }
 
-type autoCreateOption struct{}
+type autoCreateOption struct {
+	autoCreate bool
+}
 
-func WithAutoCreate() SendOption {
-	return autoCreateOption{}
+func WithAutoCreate(autoCreate bool) SendOption {
+	return autoCreateOption{autoCreate: autoCreate}
 }
 func (x autoCreateOption) apply(o *sendOptions) {
-	o.autoCreate = true
+	o.autoCreate = x.autoCreate
 }

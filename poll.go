@@ -41,6 +41,22 @@ func (e *pollEntry) Del(agentId uint64) {
 	delete(e.agents, agentId)
 }
 
+func (e *pollEntry) OnMsg(msg *Msg) {
+	e.cursor = msg.Id
+	for _, agent := range e.agents {
+		if !msgIdLess(agent.cursor, msg.Id) {
+			continue
+		}
+		select {
+		case agent.ch <- msg:
+			agent.cursor = msg.Id
+		default:
+			log.Warnf("failed to send msg to agent")
+			// TODO How to do?
+		}
+	}
+}
+
 type pollAddEvent struct {
 	agentId uint64
 	topic   string
@@ -94,25 +110,46 @@ func (p *poll) Del(ctx context.Context, agentId uint64, topic string) (err error
 }
 
 func (p *poll) Serve(ctx context.Context, db redis.Client) {
-	entries := make(map[string]*pollEntry)
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case v := <-p.addEvents:
+	var (
+		entries = make(map[string]*pollEntry)
+
+		addEntry = func(v pollAddEvent) {
 			e, ok := entries[v.topic]
 			if !ok {
 				e = newPollEntry()
 				entries[v.topic] = e
 			}
 			e.Add(v.agentId, v.cursor, v.ch)
-		case v := <-p.delEvents:
+		}
+
+		delEntry = func(v pollDelEvent) {
 			if e, ok := entries[v.topic]; ok {
 				if e.Del(v.agentId); e.Empty() {
 					delete(entries, v.topic)
 				}
 			}
-		default:
+		}
+	)
+	for {
+		if len(entries) == 0 {
+			select {
+			case <-ctx.Done():
+				return
+			case v := <-p.addEvents:
+				addEntry(v)
+			case v := <-p.delEvents:
+				delEntry(v)
+			}
+		} else {
+			select {
+			case <-ctx.Done():
+				return
+			case v := <-p.addEvents:
+				addEntry(v)
+			case v := <-p.delEvents:
+				delEntry(v)
+			default:
+			}
 		}
 
 		var topics, cursors []string
@@ -149,19 +186,7 @@ func (p *poll) Serve(ctx context.Context, db redis.Client) {
 				}
 				msg.Topic = s.Stream
 
-				e.cursor = msg.Id
-				for _, agent := range e.agents {
-					if !msgIdLess(agent.cursor, msg.Id) {
-						continue
-					}
-					select {
-					case agent.ch <- msg:
-						agent.cursor = msg.Id
-					default:
-						log.Warnf("failed to send msg to agent")
-						// TODO How to do?
-					}
-				}
+				e.OnMsg(msg)
 			}
 		}
 	}
