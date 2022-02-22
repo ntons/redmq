@@ -19,6 +19,8 @@ type Client interface {
 	Serve(ctx context.Context)
 
 	Watch(ctx context.Context, topic, cursor string, callback func(*Msg)) error
+
+	Delete(ctx context.Context, topics ...string) error
 }
 
 var _ Client = (*client)(nil)
@@ -135,4 +137,8 @@ func (cli *client) WatchChan(ctx context.Context, topic, cursor string, ch chan<
 
 func (cli *client) Serve(ctx context.Context) {
 	cli.poll.Serve(ctx, cli.db)
+}
+
+func (cli *client) Delete(ctx context.Context, topics ...string) (err error) {
+	return cli.db.Del(ctx, topics...).Err()
 }
