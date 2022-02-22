@@ -2,7 +2,7 @@ syntax = "proto3";
 
 package redmq;
 
-option go_package = ".;redmq";
+option go_package = "./;redmq";
 
 import "google/protobuf/any.proto";
 
